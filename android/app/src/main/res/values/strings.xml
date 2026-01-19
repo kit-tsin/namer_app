@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Replace YOUR_FACEBOOK_APP_ID with your actual Facebook App ID from Facebook Developers -->
+    <string name="facebook_app_id">850045457924806</string>
+    <!-- Replace YOUR_FACEBOOK_CLIENT_TOKEN with your actual Facebook Client Token from Facebook Developers -->
+    <!-- You can find the Client Token in Facebook Developers > Settings > Basic > App Secret (click Show, then use it as Client Token) -->
+    <string name="facebook_client_token">4e6c034752ed51722149d812bd82608a</string>
+</resources>
+

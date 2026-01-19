@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "718875273858",
+    "project_id": "namer-project-50f7d",
+    "storage_bucket": "namer-project-50f7d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:718875273858:android:5069fee28ae9fdf754a29b",
+        "android_client_info": {
+          "package_name": "com.example.namer_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBTMu9b-e5T2c1uNFt6KzFh6hW-t1DHLkA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
