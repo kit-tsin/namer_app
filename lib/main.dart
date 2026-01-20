@@ -1540,6 +1540,9 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
   late Animation<double> _swipeAnimation;
+  Animation<double>? _moveAnimation;
+  final GlobalKey _iconKey = GlobalKey();
+  bool _isValidInteraction = false;
   double _dragOffset = 0.0;
   bool _isDragging = false;
   double? _screenWidth;
@@ -1581,6 +1584,8 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
     );
     _scaleAnimation = Tween<double>(begin: 1.0, end: 1.5)
         .animate(CurvedAnimation(parent: _scaleController, curve: Curves.easeOut));
+    _moveAnimation = Tween<double>(begin: 0.0, end: 35.0)
+        .animate(CurvedAnimation(parent: _scaleController, curve: Curves.easeOut));
   }
 
   @override
@@ -1591,8 +1596,23 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
     super.dispose();
   }
 
+  bool _checkValidInteraction(Offset globalPosition) {
+    final RenderBox? iconBox = _iconKey.currentContext?.findRenderObject() as RenderBox?;
+    if (iconBox == null) return false;
+    
+    final iconPos = iconBox.localToGlobal(Offset.zero);
+    final iconRight = iconPos.dx + iconBox.size.width;
+    
+    return globalPosition.dx <= iconRight;
+  }
+
   void _onTapDown(TapDownDetails details) {
-    _scaleController.forward();
+    if (_checkValidInteraction(details.globalPosition)) {
+      setState(() {
+        _isValidInteraction = true;
+      });
+      _scaleController.forward();
+    }
   }
 
   void _onTapUp(TapUpDetails details) {
@@ -1600,21 +1620,24 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
   }
 
   void _onTapCancel() {
-    if (!_isDragging) {
-      _scaleController.reverse();
-    }
+    _scaleController.reverse();
   }
 
   void _onHorizontalDragStart(DragStartDetails details) {
-    if (!_isDragging) {
+    if (_checkValidInteraction(details.globalPosition)) {
       setState(() {
+        _isValidInteraction = true;
         _isDragging = true;
       });
       _scaleController.forward();
+    } else {
+      _isDragging = false;
     }
   }
 
   void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    if (!_isValidInteraction) return;
+
     setState(() {
       // Apply resistance: initial movement is slower
       double delta = details.primaryDelta ?? 0.0;
@@ -1638,6 +1661,8 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
   }
 
   void _onHorizontalDragEnd(DragEndDetails details) {
+    if (!_isValidInteraction) return;
+
     setState(() {
       _isDragging = false;
     });
@@ -1717,7 +1742,7 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
       child: Stack(
         children: [
           // Trash icon background (shown when swiped)
-          if (_dragOffset >= _trashIconThreshold)
+          if (_isValidInteraction && (_dragOffset > 0 || _scaleController.value > 0))
             Positioned.fill(
               child: Align(
                 alignment: Alignment.centerRight,
@@ -1741,8 +1766,14 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
             onHorizontalDragEnd: _onHorizontalDragEnd,
             child: ScaleTransition(
               scale: _scaleAnimation,
-              child: Transform.translate(
-                offset: Offset(_dragOffset, 0),
+              child: AnimatedBuilder(
+                animation: _moveAnimation ?? const AlwaysStoppedAnimation(0.0),
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(_dragOffset + (_moveAnimation?.value ?? 0.0), 0),
+                    child: child,
+                  );
+                },
                 child: AnimatedContainer(
                   duration: _isDragging 
                       ? Duration.zero 
@@ -1752,7 +1783,7 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
                     title: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.favorite),
+                        Icon(Icons.favorite, key: _iconKey),
                         SizedBox(width: 10),
                         Text(widget.pair.asLowerCase),
                       ],
@@ -1928,7 +1959,10 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
   late Animation<Offset> _slideAnimationRight;
   late Animation<double> _promptOpacity;
   late Animation<double> _wordOpacity;
-  late Animation<double> _pressScale;
+  Animation<double>? _tutorialOffset;
+  late AnimationController _reboundController;
+  late Animation<double> _reboundAnimation;
+  double _dragOffsetY = 0.0;
 
   @override
   void initState() {
@@ -1959,27 +1993,32 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
     _wordOpacity = Tween<double>(begin: 1.0, end: 0.0)
         .animate(CurvedAnimation(parent: _promptController, curve: Curves.easeInOut));
     
-    // Animation for press effect (scale)
+    // Animation for tutorial gesture (move up)
     _pressController = AnimationController(
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 500),
       vsync: this,
     );
 
-    // Press effect: scale down slightly to simulate button press (no movement)
-    _pressScale = Tween<double>(begin: 1.0, end: 0.96)
+    // Tutorial effect: move up to simulate push up gesture
+    _tutorialOffset = Tween<double>(begin: 0.0, end: -50.0)
         .animate(CurvedAnimation(parent: _pressController, curve: Curves.easeInOut));
+
+    // Animation for rebound (spring back)
+    _reboundController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    _reboundAnimation = Tween<double>(begin: 0, end: 0).animate(_reboundController);
+    _reboundController.addListener(() {
+      setState(() {
+        _dragOffsetY = _reboundAnimation.value;
+      });
+    });
 
     // Always start with word visible, prompt hidden
     _promptController.value = 0.0;
 
     _controller.forward();
-
-    // Always show a simple press animation when the card first appears
-    _pressController.forward().then((_) {
-      if (mounted) {
-        _pressController.reverse();
-      }
-    });
 
     // Show initial prompt animation only if showInitialPrompt is true
     if (widget.showInitialPrompt) {
@@ -2020,6 +2059,15 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
       if (!widget.showInitialPrompt) {
         _promptController.reset();
       }
+      // Stop any ongoing rebound animation first
+      _reboundController.stop();
+      _reboundController.reset();
+      // Reset drag state after stopping animation to prevent listener interference
+      setState(() {
+        _dragOffsetY = 0.0;
+      });
+      // Reset the rebound animation to ensure listener uses correct values
+      _reboundAnimation = Tween<double>(begin: 0.0, end: 0.0).animate(_reboundController);
     }
   }
 
@@ -2028,15 +2076,74 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
     _controller.dispose();
     _promptController.dispose();
     _pressController.dispose();
+    _reboundController.dispose();
     super.dispose();
   }
 
-  void _handleTap() {
-    // Animate press effect
-    _pressController.forward().then((_) {
-      _pressController.reverse();
+  void _onVerticalDragStart(DragStartDetails details) {
+    // Stop any ongoing rebound animation immediately when user starts dragging
+    if (_reboundController.isAnimating) {
+      _reboundController.stop();
+      _reboundController.reset();
+    }
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
+    // Stop rebound animation if it's still running
+    if (_reboundController.isAnimating) {
+      _reboundController.stop();
+      _reboundController.reset();
+    }
+    
+    setState(() {
+      // Apply resistance: move less than the finger
+      _dragOffsetY += details.primaryDelta! * 0.4;
     });
-    widget.onTap();
+  }
+
+  void _onVerticalDragEnd(DragEndDetails details) {
+    // Save the current drag offset before any modifications
+    final currentOffset = _dragOffsetY;
+    
+    // Stop any ongoing rebound animation before starting a new one
+    _reboundController.stop();
+    
+    // If dragged up far enough (negative offset), trigger action
+    if (currentOffset < -50) {
+      widget.onTap();
+      // Reset drag offset immediately when action is triggered
+      // The didUpdateWidget will handle full reset when pair changes
+      setState(() {
+        _dragOffsetY = 0.0;
+      });
+      return; // Don't animate rebound if we triggered action
+    }
+
+    // Animate back to center only if action wasn't triggered and there's an offset
+    if (currentOffset != 0.0) {
+      _reboundAnimation = Tween<double>(
+        begin: currentOffset,
+        end: 0.0,
+      ).animate(CurvedAnimation(
+        parent: _reboundController,
+        curve: Curves.elasticOut,
+      ));
+
+      _reboundController.reset();
+      _reboundController.forward().then((_) {
+        // Ensure _dragOffsetY is exactly 0.0 when animation completes
+        if (mounted) {
+          setState(() {
+            _dragOffsetY = 0.0;
+          });
+        }
+      });
+    } else {
+      // If already at 0, ensure it stays at 0
+      setState(() {
+        _dragOffsetY = 0.0;
+      });
+    }
   }
 
   @override
@@ -2055,13 +2162,14 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
 
     return Center(
       child: GestureDetector(
-        onTap: _handleTap,
+        onVerticalDragStart: _onVerticalDragStart,
+        onVerticalDragUpdate: _onVerticalDragUpdate,
+        onVerticalDragEnd: _onVerticalDragEnd,
         child: AnimatedBuilder(
-          animation: _pressScale,
+          animation: _tutorialOffset ?? const AlwaysStoppedAnimation(0.0),
           builder: (context, child) {
-            return Transform.scale(
-              scale: _pressScale.value,
-              alignment: Alignment.center,
+            return Transform.translate(
+              offset: Offset(0, _dragOffsetY + (_tutorialOffset?.value ?? 0.0)),
               child: child,
             );
           },
@@ -2121,7 +2229,7 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
                       FadeTransition(
                         opacity: _promptOpacity,
                         child: Text(
-                          'press to generate',
+                          'push up to generate',
                           style: promptStyle,
                           textAlign: TextAlign.center,
                         ),
