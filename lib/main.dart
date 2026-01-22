@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -14,10 +15,18 @@ import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'dart:io' show Platform;
 
 import 'firebase_options.dart';
 
+
+enum SortOption {
+  latestToOldest,
+  oldestToLatest,
+  alphabetical,
+  reverseAlphabetical,
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -814,10 +823,91 @@ class MyAppState extends ChangeNotifier {
   var current = WordPair.random();
   var history = <WordPair>[];  // list of word pairs that have been generated
   bool _hasLoggedInBefore = false;
+  SortOption _sortOption = SortOption.oldestToLatest;
+
+  SortOption get sortOption => _sortOption;
+
+  void setSortOption(SortOption option) {
+    _sortOption = option;
+    notifyListeners();
+  }
+
+  // Toggle alphabetical sorting (A-Z ↔ Z-A)
+  void toggleAlphabeticalSort() {
+    if (_sortOption == SortOption.alphabetical) {
+      _sortOption = SortOption.reverseAlphabetical;
+    } else if (_sortOption == SortOption.reverseAlphabetical) {
+      _sortOption = SortOption.alphabetical;
+    } else {
+      // Switch to alphabetical from date-based sorting
+      _sortOption = SortOption.alphabetical;
+    }
+    notifyListeners();
+  }
+
+  // Toggle date sorting (Oldest to Newest ↔ Newest to Oldest)
+  void toggleDateSort() {
+    if (_sortOption == SortOption.oldestToLatest) {
+      _sortOption = SortOption.latestToOldest;
+    } else if (_sortOption == SortOption.latestToOldest) {
+      _sortOption = SortOption.oldestToLatest;
+    } else {
+      // Switch to date-based sorting from alphabetical
+      _sortOption = SortOption.oldestToLatest;
+    }
+    notifyListeners();
+  }
+
+  // Check if currently using alphabetical sorting
+  bool get isAlphabeticalSort => 
+      _sortOption == SortOption.alphabetical || 
+      _sortOption == SortOption.reverseAlphabetical;
+
+  // Check if currently using date sorting
+  bool get isDateSort => 
+      _sortOption == SortOption.oldestToLatest || 
+      _sortOption == SortOption.latestToOldest;
+
+  List<WordPair> get sortedFavorites {
+    List<WordPair> sorted = List.from(favorites);
+    switch (_sortOption) {
+      case SortOption.latestToOldest:
+        return sorted.reversed.toList();
+      case SortOption.oldestToLatest:
+        return sorted;
+      case SortOption.alphabetical:
+        sorted.sort((a, b) => a.asLowerCase.compareTo(b.asLowerCase));
+        return sorted;
+      case SortOption.reverseAlphabetical:
+        sorted.sort((a, b) => b.asLowerCase.compareTo(a.asLowerCase));
+        return sorted;
+    }
+  }
+
   bool get hasLoggedInBefore => _hasLoggedInBefore;
   
-  void _playSound() {
-    SystemSound.play(SystemSoundType.click);
+  static final AudioPlayer _audioPlayer = AudioPlayer();
+  
+  Future<void> _playSound() async {
+    try {
+      // Stop any ongoing playback before starting a new one
+      await _audioPlayer.stop();
+      await _audioPlayer.play(AssetSource('sounds/button_click.mp3'));
+    } catch (e) {
+      // Fallback to system sound if custom sound fails
+      SystemSound.play(SystemSoundType.click);
+    }
+  }
+  
+  Future<void> _playDeleteSound() async {
+    try {
+      // Stop any ongoing playback before starting a new one
+      await _audioPlayer.stop();
+      await _audioPlayer.play(AssetSource('sounds/delete.mp3'));
+    } catch (e) {
+      // Fallback to system sound if custom sound fails
+      SystemSound.play(SystemSoundType.click);
+    }
   }
 
   MyAppState() {
@@ -981,7 +1071,7 @@ class MyAppState extends ChangeNotifier {
   var favorites = <WordPair>{};
 
     void toggleFavorite() {
-    _playSound();
+    // Removed sound - no sound when toggling favorite
     if (favorites.contains(current)) {
       favorites.remove(current);
     } else {
@@ -992,7 +1082,7 @@ class MyAppState extends ChangeNotifier {
   }
 
   void playDeleteSound() {
-    _playSound();
+    _playDeleteSound();
   }
 
   void removeFavorite(WordPair pair) {
@@ -1029,6 +1119,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver, Si
   var selectedIndex = 0;
   Orientation? _previousOrientation;
   double _dragStartX = 0.0;
+  bool _isRailDrag = false; // Track if this drag is meant for the navigation rail
   late AnimationController _railController;
 
   @override
@@ -1053,7 +1144,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver, Si
 
   void _animateRail(bool open) {
     if (open) {
-      _railController.animateTo(1.0, duration: Duration(milliseconds: 1500), curve: Curves.elasticOut);
+      _railController.animateTo(1.0, duration: Duration(milliseconds: 800), curve: Curves.elasticOut);
+      _railController.animateTo(1.0, duration: Duration(milliseconds: 800), curve: Curves.elasticOut);
     } else {
       _railController.animateTo(0.0, duration: Duration(milliseconds: 200), curve: Curves.easeInOut);
     }
@@ -1240,26 +1332,47 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver, Si
     _dragStartX = details.globalPosition.dx;
     
     bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-    if (isLandscape) return;
+    if (isLandscape) {
+      _isRailDrag = false;
+      return;
+    }
 
-    // Only allow drag from left edge if closed
-    if (!isExtended && _dragStartX > 100) return;
+    // Only allow drag from left edge if closed, or if rail is already extended
+    if (!isExtended && _dragStartX > 100) {
+      _isRailDrag = false;
+      return;
+    }
 
+    // This is a valid navigation rail drag
+    _isRailDrag = true;
     _railController.stop();
   }
 
   void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    // Only process if this is a valid navigation rail drag
+    if (!_isRailDrag) return;
+    
     bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-    if (isLandscape) return;
-    if (!isExtended && _dragStartX > 100) return;
+    if (isLandscape) {
+      _isRailDrag = false;
+      return;
+    }
 
     double delta = details.primaryDelta ?? 0;
     _railController.value += delta / 184.0; // 184 is the expansion width (256 - 72)
   }
 
   void _onHorizontalDragEnd(DragEndDetails details, bool isLandscape) {
-    if (isLandscape) return;
-    if (!isExtended && _dragStartX > 100) return;
+    // Only process if this is a valid navigation rail drag
+    if (!_isRailDrag) {
+      _isRailDrag = false;
+      return;
+    }
+    
+    if (isLandscape) {
+      _isRailDrag = false;
+      return;
+    }
 
     final double velocity = details.primaryVelocity ?? 0;
     
@@ -1277,6 +1390,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver, Si
         _isOpenByGesture = false;
       });
     }
+    
+    // Reset flag after processing
+    _isRailDrag = false;
   }
 
   void _handleDestinationSelected(BuildContext context, int value) async {
@@ -1479,46 +1595,277 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver, Si
   }
 }
 
-class FavoritesPage extends StatelessWidget {
+class FavoritesPage extends StatefulWidget {
+  @override
+  State<FavoritesPage> createState() => _FavoritesPageState();
+}
+
+class _FavoritesPageState extends State<FavoritesPage> {
+  final ScrollController _scrollController = ScrollController();
+  bool _isDragging = false;
+  double _dragPosition = 0.0; // 0.0 to 1.0
+  String _currentLetter = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_isDragging && _scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      if (maxScroll > 0) {
+        setState(() {
+          _dragPosition = (_scrollController.offset / maxScroll).clamp(0.0, 1.0);
+        });
+      }
+    }
+  }
+
+  void _handleDrag(double dy, double height, List<WordPair> items) {
+    if (items.isEmpty || height <= 0) return;
+
+    // Clamp position between 0 and 1
+    double position = (dy / height).clamp(0.0, 1.0);
+
+    // Update scroll position
+    if (_scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      _scrollController.jumpTo(position * maxScroll);
+    }
+
+    // Determine letter
+    int index = (position * (items.length - 1)).round();
+    String letter = '';
+    if (index >= 0 && index < items.length) {
+      letter = items[index].asLowerCase.substring(0, 1).toUpperCase();
+    }
+
+    // Only trigger haptic, sound, and state update if letter changed
+    if (letter != _currentLetter) {
+      HapticFeedback.selectionClick();
+      SystemSound.play(SystemSoundType.click);
+    }
+
+    setState(() {
+      _dragPosition = position;
+      _isDragging = true;
+      _currentLetter = letter;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
-    return Center(
-      child: Column(
-        children: [
+    var theme = Theme.of(context);
+    final sortedItems = appState.sortedFavorites;
+    final bool showScrollbar = appState.isAlphabeticalSort && sortedItems.isNotEmpty;
+    final bool isReversed = appState.sortOption == SortOption.reverseAlphabetical;
+    final bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
-          // A Non-scrollable title
-          Padding(
-            padding: const EdgeInsets.all(20), 
-            child: Text('You have ${appState.favorites.length} favorites:',
-            style: Theme.of(context).textTheme.titleLarge,
+    return LayoutBuilder(builder: (context, constraints) {
+      // Calculate size based on orientation:
+      // Portrait: 80% of width
+      // Landscape: 90% of height
+      double iconSize;
+      if (constraints.maxWidth < constraints.maxHeight) {
+        iconSize = constraints.maxWidth * 0.8;
+      } else {
+        iconSize = constraints.maxHeight * 0.9;
+      }
+
+      // Calculate max width for list - account for scrollbar in both orientations
+      final double scrollbarWidth = 48; // Width of scrollbar including padding
+      final double maxListWidth = showScrollbar 
+          ? (isLandscape ? constraints.maxWidth - scrollbarWidth - 4 : constraints.maxWidth - scrollbarWidth - 4)
+          : (isLandscape ? constraints.maxWidth - 20 : 400);
+
+      return Stack(
+        children: [
+          Center(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(Icons.favorite,
+                    size: iconSize,
+                    color: theme.colorScheme.primary.withOpacity(0.2)),
+                Text(
+                  '${appState.favorites.length}',
+                  style: theme.textTheme.displayLarge!.copyWith(
+                    color: theme.colorScheme.primary.withOpacity(0.5),
+                    fontWeight: FontWeight.bold,
+                    fontSize: iconSize * 0.3,
+                  ),
+                ),
+              ],
             ),
           ),
-
-          // A scrollable list of favorites
-          Expanded(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: 400),
-                child: ListView.builder(
-                  itemCount: appState.favorites.length,
-                  itemBuilder: (context, index) {
-                    var pair = appState.favorites.elementAt(index);
-                    return FavoriteItem(
-                      key: ValueKey(pair),
-                      pair: pair,
-                      appState: appState,
-                    );
-                  },
+          Column(
+            children: [
+              SizedBox(height: 20),
+              // Sort Options - Two toggle buttons
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Alphabetical sorting toggle (A-Z) - always shows A-Z icon
+                    _AlphabeticalSortButton(),
+                    // Date sorting toggle (Oldest to Newest / Newest to Oldest)
+                    _DateSortButton(),
+                  ],
                 ),
               ),
-            ),
-        ),
-      ],
-      ),
-    );
+              Expanded(
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: maxListWidth),
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          itemCount: sortedItems.length,
+                          itemBuilder: (context, index) {
+                            var pair = sortedItems[index];
+                            return FavoriteItem(
+                              key: ValueKey(pair),
+                              pair: pair,
+                              appState: appState,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    if (_isDragging && _currentLetter.isNotEmpty)
+                      Center(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(24),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                            child: Container(
+                              padding: EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+                              decoration: BoxDecoration(
+                                color: (theme.brightness == Brightness.dark 
+                                  ? Colors.white 
+                                  : Colors.black).withOpacity(0.3),
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: theme.colorScheme.primary.withOpacity(0.3),
+                                  width: 1,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.1),
+                                    blurRadius: 8,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Text(
+                                _currentLetter,
+                                style: TextStyle(
+                                  fontSize: 48,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.brightness == Brightness.dark 
+                                    ? Colors.white 
+                                    : Colors.black87,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (showScrollbar)
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: 48,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 2),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4.0),
+                              child: Text(
+                                isReversed ? 'Z' : 'A',
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: LayoutBuilder(
+                                builder: (context, scrollConstraints) {
+                                  return GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onVerticalDragStart: (details) => _handleDrag(details.localPosition.dy, scrollConstraints.maxHeight, sortedItems),
+                                    onVerticalDragUpdate: (details) => _handleDrag(details.localPosition.dy, scrollConstraints.maxHeight, sortedItems),
+                                    onVerticalDragEnd: (_) => setState(() => _isDragging = false),
+                                    onTapUp: (details) {
+                                      _handleDrag(details.localPosition.dy, scrollConstraints.maxHeight, sortedItems);
+                                      setState(() => _isDragging = false);
+                                    },
+                                    child: Stack(
+                                      alignment: Alignment.topCenter,
+                                      children: [
+                                        // Invisible track to capture touches
+                                        Container(color: Colors.transparent),
+                                        // The Handle
+                                        Align(
+                                          alignment: Alignment(0, _dragPosition * 2 - 1),
+                                          child: Container(
+                                            width: 8,
+                                            height: 48,
+                                            decoration: BoxDecoration(
+                                              color: theme.colorScheme.primary.withOpacity(0.5),
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4.0),
+                              child: Text(
+                                isReversed ? 'A' : 'Z',
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    });
   }
-} 
+}
 
 class FavoriteItem extends StatefulWidget {
   const FavoriteItem({
@@ -1537,31 +1884,18 @@ class FavoriteItem extends StatefulWidget {
 class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMixin {
   late AnimationController _controller;
   late AnimationController _swipeController;
-  late AnimationController _scaleController;
-  late Animation<double> _scaleAnimation;
+  late AnimationController _trashAnimationController;
+  late Animation<double> _sizeAnimation;
   late Animation<double> _swipeAnimation;
-  Animation<double>? _moveAnimation;
-  final GlobalKey _iconKey = GlobalKey();
-  bool _isValidInteraction = false;
+  late Animation<double> _trashVibrationAnimation;
+  
   double _dragOffset = 0.0;
-  bool _isDragging = false;
   double? _screenWidth;
   
-  // Thresholds for swipe behavior (will be adjusted based on screen width)
-  double _trashIconThreshold = 60.0; // Show trash icon threshold
-  double _deleteThreshold = 120.0; // Auto-delete threshold
-  static const double _resistanceFactor = 0.3; // Initial swipe is 30% of finger movement
-  
-  // Portrait mode thresholds (narrower screens)
-  static const double _portraitTrashIconThreshold = 30.0;
-  static const double _portraitDeleteThreshold = 60.0;
-  
-  // Landscape mode thresholds (wider screens)
-  static const double _landscapeTrashIconThreshold = 60.0;
-  static const double _landscapeDeleteThreshold = 120.0;
-  
-  // Breakpoint to determine portrait vs landscape (600px is a common breakpoint)
-  static const double _portraitBreakpoint = 600.0;
+  // Thresholds for swipe behavior
+  static const double _trashIconThreshold = 40.0; // Show trash icon threshold
+  static const double _deleteThreshold = 120.0; // Auto-delete threshold
+  static const double _resistanceFactor = 0.4; // Initial swipe is 40% of finger movement
 
   @override
   void initState() {
@@ -1571,6 +1905,8 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
       vsync: this,
       value: 1.0,
     );
+    _sizeAnimation = _controller;
+    
     _swipeController = AnimationController(
       duration: const Duration(milliseconds: 200),
       vsync: this,
@@ -1578,105 +1914,68 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
     _swipeAnimation = Tween<double>(begin: 0.0, end: 0.0).animate(
       CurvedAnimation(parent: _swipeController, curve: Curves.easeOut),
     );
-    _scaleController = AnimationController(
-      duration: const Duration(milliseconds: 150),
+    
+    _trashAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.5)
-        .animate(CurvedAnimation(parent: _scaleController, curve: Curves.easeOut));
-    _moveAnimation = Tween<double>(begin: 0.0, end: 35.0)
-        .animate(CurvedAnimation(parent: _scaleController, curve: Curves.easeOut));
+    _trashVibrationAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _trashAnimationController,
+        curve: Curves.elasticOut,
+      ),
+    );
   }
 
   @override
   void dispose() {
     _controller.dispose();
     _swipeController.dispose();
-    _scaleController.dispose();
+    _trashAnimationController.dispose();
     super.dispose();
   }
-
-  bool _checkValidInteraction(Offset globalPosition) {
-    final RenderBox? iconBox = _iconKey.currentContext?.findRenderObject() as RenderBox?;
-    if (iconBox == null) return false;
-    
-    final iconPos = iconBox.localToGlobal(Offset.zero);
-    final iconRight = iconPos.dx + iconBox.size.width;
-    
-    return globalPosition.dx <= iconRight;
+  
+  void _onPanStart(DragStartDetails details) {
+    _screenWidth = MediaQuery.of(context).size.width;
+    _swipeController.stop();
   }
-
-  void _onTapDown(TapDownDetails details) {
-    if (_checkValidInteraction(details.globalPosition)) {
-      setState(() {
-        _isValidInteraction = true;
-      });
-      _scaleController.forward();
-    }
-  }
-
-  void _onTapUp(TapUpDetails details) {
-    _scaleController.reverse();
-  }
-
-  void _onTapCancel() {
-    _scaleController.reverse();
-  }
-
-  void _onHorizontalDragStart(DragStartDetails details) {
-    if (_checkValidInteraction(details.globalPosition)) {
-      setState(() {
-        _isValidInteraction = true;
-        _isDragging = true;
-      });
-      _scaleController.forward();
-    } else {
-      _isDragging = false;
-    }
-  }
-
-  void _onHorizontalDragUpdate(DragUpdateDetails details) {
-    if (!_isValidInteraction) return;
-
+  
+  void _onPanUpdate(DragUpdateDetails details) {
     setState(() {
-      // Apply resistance: initial movement is slower
+      // Use primaryDelta for horizontal drag gestures
       double delta = details.primaryDelta ?? 0.0;
       
-      // If dragging right (positive delta)
+      // Only process rightward drags (positive delta) or leftward when already dragged
       if (delta > 0) {
         // Apply resistance factor for initial movement
         if (_dragOffset < _trashIconThreshold) {
           _dragOffset += delta * _resistanceFactor;
         } else {
           // Less resistance after passing trash icon threshold
-          _dragOffset += delta * 0.7;
+          _dragOffset += delta * 0.8;
         }
         _dragOffset = _dragOffset.clamp(0.0, double.infinity);
-      } else {
-        // Dragging left (negative delta) - allow bounce back
+      } else if (delta < 0 && _dragOffset > 0) {
+        // Allow bounce back when dragging left
         _dragOffset += delta;
         _dragOffset = _dragOffset.clamp(0.0, double.infinity);
       }
     });
   }
-
-  void _onHorizontalDragEnd(DragEndDetails details) {
-    if (!_isValidInteraction) return;
-
-    setState(() {
-      _isDragging = false;
-    });
-
+  
+  void _onPanEnd(DragEndDetails details) {
     // Check if we've passed the delete threshold
     if (_dragOffset >= _deleteThreshold && _screenWidth != null) {
-      // Play sound immediately upon confirmation (before animation completes)
+      // Play sound immediately upon confirmation
       widget.appState.playDeleteSound();
-
+      
+      // Animate trash icon vibration
+      _trashAnimationController.forward();
+      
       // Auto-complete swipe: quickly swipe all the way to the right
       final targetOffset = _screenWidth!;
       final startOffset = _dragOffset;
       
-      // Reset and create new animation
       _swipeController.reset();
       _swipeAnimation = Tween<double>(
         begin: startOffset,
@@ -1686,7 +1985,6 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
         curve: Curves.easeOut,
       ));
       
-      // Add listener to update drag offset during animation
       void animationListener() {
         if (mounted) {
           setState(() {
@@ -1698,7 +1996,6 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
       _swipeAnimation.addListener(animationListener);
       
       _swipeController.forward().then((_) {
-        // Remove listener to prevent memory leaks
         _swipeAnimation.removeListener(animationListener);
         // After swipe completes, shrink and delete
         if (mounted) {
@@ -1710,91 +2007,146 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
         }
       });
     } else {
-      // Bounce back to center
-      _scaleController.reverse();
-      setState(() {
-        _dragOffset = 0.0;
+      // Bounce back to center with animation
+      final startOffset = _dragOffset;
+      _swipeController.reset();
+      _swipeAnimation = Tween<double>(
+        begin: startOffset,
+        end: 0.0,
+      ).animate(CurvedAnimation(
+        parent: _swipeController,
+        curve: Curves.easeOut,
+      ));
+      
+      void animationListener() {
+        if (mounted) {
+          setState(() {
+            _dragOffset = _swipeAnimation.value;
+          });
+        }
+      }
+      
+      _swipeAnimation.addListener(animationListener);
+      
+      _swipeController.forward().then((_) {
+        if (mounted) {
+          _swipeAnimation.removeListener(animationListener);
+        }
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Store screen width for use in drag end handler
-    _screenWidth = MediaQuery.of(context).size.width;
+    final theme = Theme.of(context);
+    _screenWidth ??= MediaQuery.of(context).size.width;
     
-    // Adjust thresholds based on screen width (portrait vs landscape)
-    if (_screenWidth != null) {
-      if (_screenWidth! < _portraitBreakpoint) {
-        // Portrait mode (narrower screen)
-        _trashIconThreshold = _portraitTrashIconThreshold;
-        _deleteThreshold = _portraitDeleteThreshold;
-      } else {
-        // Landscape mode (wider screen)
-        _trashIconThreshold = _landscapeTrashIconThreshold;
-        _deleteThreshold = _landscapeDeleteThreshold;
-      }
-    }
-    
-    return SizeTransition(
-      sizeFactor: _controller,
-      axisAlignment: -1.0,
-      child: Stack(
-        children: [
-          // Trash icon background (shown when swiped)
-          if (_isValidInteraction && (_dragOffset > 0 || _scaleController.value > 0))
-            Positioned.fill(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 20),
-                  child: Icon(
-                    Icons.delete_outline,
-                    color: Theme.of(context).colorScheme.error,
-                    size: 24,
-                  ),
-                ),
-              ),
-            ),
-          // Swipeable content
-          GestureDetector(
-            onTapDown: _onTapDown,
-            onTapUp: _onTapUp,
-            onTapCancel: _onTapCancel,
-            onHorizontalDragStart: _onHorizontalDragStart,
-            onHorizontalDragUpdate: _onHorizontalDragUpdate,
-            onHorizontalDragEnd: _onHorizontalDragEnd,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
-              child: AnimatedBuilder(
-                animation: _moveAnimation ?? const AlwaysStoppedAnimation(0.0),
-                builder: (context, child) {
-                  return Transform.translate(
-                    offset: Offset(_dragOffset + (_moveAnimation?.value ?? 0.0), 0),
-                    child: child,
-                  );
-                },
-                child: AnimatedContainer(
-                  duration: _isDragging 
-                      ? Duration.zero 
-                      : const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                  child: ListTile(
-                    title: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.favorite, key: _iconKey),
-                        SizedBox(width: 10),
-                        Text(widget.pair.asLowerCase),
-                      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Calculate available width (account for horizontal margins: 8px on each side = 16px total)
+        final availableWidth = constraints.maxWidth;
+        final maxAvailableWidth = availableWidth - 16.0;
+        
+        // Calculate delete background width
+        final deleteBackgroundWidth = _dragOffset.clamp(0.0, maxAvailableWidth);
+        final showDeleteBackground = deleteBackgroundWidth > 0;
+        
+        // Calculate word pair width and position
+        // Word pair shrinks from left: its left edge moves right as delete expands
+        // Right edge stays fixed at: 8 + maxAvailableWidth
+        final wordPairFullWidth = maxAvailableWidth;
+        final wordPairWidth = (wordPairFullWidth - deleteBackgroundWidth).clamp(0.0, wordPairFullWidth);
+        final wordPairLeft = 8 + deleteBackgroundWidth; // Left edge moves right as delete expands
+        
+        return SizeTransition(
+          sizeFactor: _sizeAnimation,
+          axisAlignment: -1.0,
+          child: SizedBox(
+            height: 60, // Fixed height for spacing
+            child: GestureDetector(
+              onHorizontalDragStart: _onPanStart,
+              onHorizontalDragUpdate: _onPanUpdate,
+              onHorizontalDragEnd: _onPanEnd,
+              behavior: HitTestBehavior.opaque,
+              child: Stack(
+                clipBehavior: Clip.hardEdge,
+                children: [
+                  // Delete background (expands from left as user swipes right)
+                  if (showDeleteBackground)
+                    Positioned(
+                      left: 8,
+                      top: 4,
+                      bottom: 4,
+                      width: deleteBackgroundWidth,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16), // Rounder corners
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.error.withOpacity(0.6), // Semi-transparent red
+                            borderRadius: BorderRadius.circular(16), // Rounder corners
+                          ),
+                          child: deleteBackgroundWidth >= 44
+                              ? Row(
+                                  mainAxisAlignment: MainAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 16),
+                                      child: AnimatedBuilder(
+                                        animation: _trashVibrationAnimation,
+                                        builder: (context, child) {
+                                          // Create vibration effect with quick shake
+                                          final shakeAmount = 3.0;
+                                          final shakeX = (math.sin(_trashVibrationAnimation.value * 20) * shakeAmount);
+                                          final shakeY = (math.cos(_trashVibrationAnimation.value * 20) * shakeAmount);
+                                          return Transform.translate(
+                                            offset: Offset(shakeX, shakeY),
+                                            child: Icon(
+                                              Icons.delete_outline,
+                                              color: theme.colorScheme.onError,
+                                              size: 28,
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
+                  // Word pair rectangle (shrinks from left, right edge stays fixed)
+                  // Left edge moves right as delete expands, right edge stays at same position
+                  Positioned(
+                    left: wordPairLeft, // Left edge moves right as delete expands
+                    top: 4,
+                    bottom: 4,
+                    width: wordPairWidth, // Width shrinks by deleteBackgroundWidth amount
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: (theme.brightness == Brightness.dark 
+                          ? Colors.white 
+                          : Colors.black).withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ListTile(
+                        title: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.favorite),
+                            SizedBox(width: 10),
+                            Text(widget.pair.asLowerCase),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -1804,12 +2156,22 @@ class GeneratorPage extends StatefulWidget {
   State<GeneratorPage> createState() => _GeneratorPageState();
 }
 
-class _GeneratorPageState extends State<GeneratorPage> {
+class _GeneratorPageState extends State<GeneratorPage> with SingleTickerProviderStateMixin {
   bool _isInitialDisplay = true;
+  late AnimationController _listController;
+  late Animation<double> _listAnimation;
+  double _dragOffset = 0.0;
 
   @override
   void initState() {
     super.initState();
+    _listController = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _listAnimation = Tween<double>(begin: 0.0, end: -35.0)
+        .animate(CurvedAnimation(parent: _listController, curve: Curves.easeOut));
+
     // Mark as no longer initial after first build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -1818,6 +2180,12 @@ class _GeneratorPageState extends State<GeneratorPage> {
         });
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _listController.dispose();
+    super.dispose();
   }
 
   @override
@@ -1833,54 +2201,60 @@ class _GeneratorPageState extends State<GeneratorPage> {
             // 1. Expandable list ensure list takes all available top space in the column
             Expanded(
               flex: 3,
-              child: Builder(
-                builder: (context) {
-                  final surfaceColor = Theme.of(context).colorScheme.surface;
-                  return ShaderMask(
-                    shaderCallback: (Rect bounds) {
-                      return LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, surfaceColor],
-                        stops: [0.0, 0.15],
-                      ).createShader(bounds);
-                    },
-                    blendMode: BlendMode.dstIn,
-                    child: ListView(
-                      reverse: true,
-                      shrinkWrap: true,
-                      physics: NeverScrollableScrollPhysics(),
-                      children: [
-                        for (var i = 0; i < appState.history.length; i++)
-                          Builder(builder: (context) {
-                            var pair = appState.history[appState.history.length - 1 - i];
-                            var opacity = (1.0 - i * 0.1).clamp(0.1, 1.0);
-                            var fontSize = (25.0 - i).clamp(14.0, 25.0);
-
-                            return Opacity(
-                              opacity: opacity,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  appState.favorites.contains(pair)
-                                      ? Icon(Icons.favorite, size: fontSize * 0.7)
-                                      : SizedBox(width: fontSize * 0.7),
-                                  SizedBox(width: 10),
-                                  Text(pair.asLowerCase,
-                                      style: TextStyle(fontSize: fontSize),
-                                      textAlign: TextAlign.center),
-                                ],
-                              ),
-                            );
-                          }),
-                      ],
-                    ),
-                  );
-                },
+              child: Transform(
+                alignment: Alignment.topCenter,
+                transform: Matrix4.identity()
+                  ..translate(0.0, _listAnimation.value, 0.0)
+                  ..scale(1.0, (1.0 + (_dragOffset * 0.003)).clamp(0.85, 1.0), 1.0),
+                child: Builder(
+                  builder: (context) {
+                    final surfaceColor = Theme.of(context).colorScheme.surface;
+                    return ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, surfaceColor],
+                          stops: [0.0, 0.15],
+                        ).createShader(bounds);
+                      },
+                      blendMode: BlendMode.dstIn,
+                      child: ListView(
+                        reverse: true,
+                        shrinkWrap: true,
+                        physics: NeverScrollableScrollPhysics(),
+                        children: [
+                          for (var i = 0; i < appState.history.length; i++)
+                            Builder(builder: (context) {
+                              var pair = appState.history[appState.history.length - 1 - i];
+                              var opacity = (1.0 - i * 0.1).clamp(0.1, 1.0);
+                              var fontSize = (25.0 - i).clamp(14.0, 25.0);
+  
+                              return Opacity(
+                                opacity: opacity,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    appState.favorites.contains(pair)
+                                        ? Icon(Icons.favorite, size: fontSize * 0.7)
+                                        : SizedBox(width: fontSize * 0.7),
+                                    SizedBox(width: 10),
+                                    Text(pair.asLowerCase,
+                                        style: TextStyle(fontSize: fontSize),
+                                        textAlign: TextAlign.center),
+                                  ],
+                                ),
+                              );
+                            }),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
-
+            
           if (!isLandscape)
             Expanded(
               flex: 4,
@@ -1891,12 +2265,24 @@ class _GeneratorPageState extends State<GeneratorPage> {
                   BigCard(
                     pair: pair,
                     onTap: () {
-                      appState.getNext();
+                      Future.delayed(const Duration(milliseconds: 200), () {
+                        if (mounted) {
+                          _listController.forward().then((_) {
+                            appState.getNext();
+                            _listController.reset();
+                          });
+                        }
+                      });
                     },
                     showInitialPrompt: _isInitialDisplay,
                     isFavorite: appState.favorites.contains(pair),
                     onToggleFavorite: () {
                       appState.toggleFavorite();
+                    },
+                    onDragOffsetChanged: (value) {
+                      setState(() {
+                        _dragOffset = value;
+                      });
                     },
                   ),
                 ],
@@ -1911,18 +2297,104 @@ class _GeneratorPageState extends State<GeneratorPage> {
                   BigCard(
                     pair: pair,
                     onTap: () {
-                      appState.getNext();
+                      Future.delayed(const Duration(milliseconds: 200), () {
+                        if (mounted) {
+                          _listController.forward().then((_) {
+                            appState.getNext();
+                            _listController.reset();
+                          });
+                        }
+                      });
                     },
                     showInitialPrompt: _isInitialDisplay,
                     isFavorite: appState.favorites.contains(pair),
                     onToggleFavorite: () {
                       appState.toggleFavorite();
                     },
+                    onDragOffsetChanged: (value) {
+                      setState(() {
+                        _dragOffset = value;
+                      });
+                    },
                   ),
                 ],
               ),
             ),
         ],
+    );
+  }
+}
+
+// Alphabetical sorting toggle button - shows A-Z or Z-A icon based on current order
+class _AlphabeticalSortButton extends StatelessWidget {
+  const _AlphabeticalSortButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = context.watch<MyAppState>();
+    final isSelected = appState.isAlphabeticalSort;
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    // Show different icon based on current alphabetical sort order
+    final String iconPath = appState.sortOption == SortOption.alphabetical
+        ? 'assets/icon/az_sort.png'  // A-Z
+        : 'assets/icon/za_sort.png';  // Z-A
+    
+    final String tooltip = appState.sortOption == SortOption.alphabetical
+        ? 'A-Z'
+        : 'Z-A';
+
+    return IconButton(
+      icon: Image.asset(
+        iconPath,
+        width: 48,
+        height: 48,
+        color: isSelected ? colorScheme.onSecondaryContainer : colorScheme.onSurfaceVariant,
+      ),
+      tooltip: tooltip,
+      isSelected: isSelected,
+      style: IconButton.styleFrom(
+        foregroundColor: isSelected ? colorScheme.onSecondaryContainer : colorScheme.onSurfaceVariant,
+        backgroundColor: isSelected ? colorScheme.secondaryContainer : null,
+      ),
+      onPressed: () => appState.toggleAlphabeticalSort(),
+    );
+  }
+}
+
+// Date sorting toggle button - shows current date order icon
+class _DateSortButton extends StatelessWidget {
+  const _DateSortButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = context.watch<MyAppState>();
+    final isSelected = appState.isDateSort;
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    // Show icon based on current date sort order
+    final String iconPath = appState.sortOption == SortOption.oldestToLatest
+        ? 'assets/icon/oldest_newest.png'  // Oldest to Newest
+        : 'assets/icon/newest_oldest.png';  // Newest to Oldest
+    
+    final String tooltip = appState.sortOption == SortOption.oldestToLatest
+        ? 'Oldest to Newest'
+        : 'Newest to Oldest';
+
+    return IconButton(
+      icon: Image.asset(
+        iconPath,
+        width: 48,
+        height: 48,
+        color: isSelected ? colorScheme.onSecondaryContainer : colorScheme.onSurfaceVariant,
+      ),
+      tooltip: tooltip,
+      isSelected: isSelected,
+      style: IconButton.styleFrom(
+        foregroundColor: isSelected ? colorScheme.onSecondaryContainer : colorScheme.onSurfaceVariant,
+        backgroundColor: isSelected ? colorScheme.secondaryContainer : null,
+      ),
+      onPressed: () => appState.toggleDateSort(),
     );
   }
 }
@@ -1939,6 +2411,7 @@ class BigCard extends StatefulWidget {
     this.showInitialPrompt = false,
     required this.isFavorite,
     required this.onToggleFavorite,
+    this.onDragOffsetChanged,
   });
 
   final WordPair pair;
@@ -1946,6 +2419,7 @@ class BigCard extends StatefulWidget {
   final bool showInitialPrompt;
   final bool isFavorite;
   final VoidCallback onToggleFavorite;
+  final ValueChanged<double>? onDragOffsetChanged;
 
   @override
   State<BigCard> createState() => _BigCardState();
@@ -2005,13 +2479,17 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
 
     // Animation for rebound (spring back)
     _reboundController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 500),
       vsync: this,
     );
     _reboundAnimation = Tween<double>(begin: 0, end: 0).animate(_reboundController);
     _reboundController.addListener(() {
       setState(() {
         _dragOffsetY = _reboundAnimation.value;
+      });
+      // Defer callback to avoid setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onDragOffsetChanged?.call(_dragOffsetY);
       });
     });
 
@@ -2066,6 +2544,10 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
       setState(() {
         _dragOffsetY = 0.0;
       });
+      // Defer callback to avoid setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onDragOffsetChanged?.call(0.0);
+      });
       // Reset the rebound animation to ensure listener uses correct values
       _reboundAnimation = Tween<double>(begin: 0.0, end: 0.0).animate(_reboundController);
     }
@@ -2099,6 +2581,10 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
       // Apply resistance: move less than the finger
       _dragOffsetY += details.primaryDelta! * 0.4;
     });
+    // Defer callback to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onDragOffsetChanged?.call(_dragOffsetY);
+    });
   }
 
   void _onVerticalDragEnd(DragEndDetails details) {
@@ -2111,12 +2597,7 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
     // If dragged up far enough (negative offset), trigger action
     if (currentOffset < -50) {
       widget.onTap();
-      // Reset drag offset immediately when action is triggered
-      // The didUpdateWidget will handle full reset when pair changes
-      setState(() {
-        _dragOffsetY = 0.0;
-      });
-      return; // Don't animate rebound if we triggered action
+      // Don't return here; let the rebound animation play to smooth the transition
     }
 
     // Animate back to center only if action wasn't triggered and there's an offset
@@ -2149,14 +2630,21 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // Text color should contrast with inverseSurface background
+    final isDark = theme.brightness == Brightness.dark;
+    
+    // Use frosty semitransparent effect in both themes (70% transparency = 30% opacity)
+    final cardColor = isDark 
+        ? Colors.white.withOpacity(0.3)  // Frosty white in dark theme
+        : Colors.black.withOpacity(0.3);  // Frosty dark in light theme
+    
+    // Text color should contrast with card background
     final style = theme.textTheme.displayMedium!.copyWith(
-      color: theme.colorScheme.onInverseSurface,
+      color: isDark ? Colors.white : Colors.black87,
       fontSize: 35,
     );
 
     final promptStyle = theme.textTheme.displayMedium!.copyWith(
-      color: theme.colorScheme.onInverseSurface,
+      color: isDark ? Colors.white.withOpacity(0.8) : Colors.black54,
       fontSize: 24,
     );
 
@@ -2173,13 +2661,40 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
               child: child,
             );
           },
-          child: Card(
-            color: theme.colorScheme.inverseSurface,
-            elevation: 5,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24.0),
-            ),
-            child: Padding(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(32.0),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(32.0),
+                  border: Border.all(
+                    color: isDark 
+                        ? Colors.white.withOpacity(0.2) 
+                        : Colors.black.withOpacity(0.1),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isDark 
+                          ? Colors.white.withOpacity(0.1) 
+                          : Colors.black.withOpacity(0.08),
+                      blurRadius: 20,
+                      spreadRadius: 0,
+                      offset: Offset(0, 4),
+                    ),
+                    BoxShadow(
+                      color: isDark 
+                          ? Colors.black.withOpacity(0.2) 
+                          : Colors.black.withOpacity(0.05),
+                      blurRadius: 8,
+                      spreadRadius: -2,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Padding(
               padding: const EdgeInsets.all(30),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -2196,7 +2711,7 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
                         widget.isFavorite ? Icons.favorite : Icons.favorite_border,
                         color: widget.isFavorite 
                             ? theme.colorScheme.error 
-                            : theme.colorScheme.onInverseSurface,
+                            : (isDark ? Colors.white.withOpacity(0.8) : Colors.black54),
                         size: 32,
                       ),
                     ),
@@ -2240,6 +2755,8 @@ class _BigCardState extends State<BigCard> with TickerProviderStateMixin {
               ),
             ),
           ),
+        ),
+      ),
         ),
       ),
     );
