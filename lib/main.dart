@@ -20,14 +20,17 @@ import 'dart:io' show Platform;
 
 import 'firebase_options.dart';
 
-
+/// Enumeration for different sorting options available in the favorites page.
+/// Used to control how favorite word pairs are displayed and sorted.
 enum SortOption {
-  latestToOldest,
-  oldestToLatest,
-  alphabetical,
-  reverseAlphabetical,
+  latestToOldest,      // Newest items first
+  oldestToLatest,      // Oldest items first (default)
+  alphabetical,        // A-Z alphabetical order
+  reverseAlphabetical, // Z-A reverse alphabetical order
 }
 
+/// Main entry point of the application.
+/// Initializes Firebase and starts the Flutter app.
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -36,8 +39,9 @@ void main() async {
   runApp(MyApp());
 }
 
-
-
+/// Root widget of the application.
+/// Sets up the MaterialApp with dynamic color support, theme configuration,
+/// and provides the MyAppState through Provider for state management.
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -108,6 +112,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver, SingleTicker
   }
 }
 
+/// User profile page widget.
+/// Displays user information, profile picture, and provides options to
+/// logout or delete the account. Handles authentication state and
+/// caches profile pictures for better performance.
 class UserProfilePage extends StatefulWidget {
   @override
   State<UserProfilePage> createState() => _UserProfilePageState();
@@ -377,6 +385,13 @@ class _UserProfilePageState extends State<UserProfilePage> {
   }
 }
 
+/// Authentication overlay widget.
+/// Provides a modal overlay for user authentication with support for:
+/// - Email/Password authentication
+/// - Google Sign-In
+/// - Facebook Sign-In
+/// - Apple Sign-In (iOS)
+/// Features a blurred background and card-based UI design.
 class AuthOverlay extends StatefulWidget {
   final bool startWithLogin;
 
@@ -802,6 +817,8 @@ class _AuthOverlayState extends State<AuthOverlay> {
   }
 }
 
+/// Reusable widget for social authentication icons.
+/// Displays a clickable icon button for social login providers.
 class _SocialIcon extends StatelessWidget {
   final Widget icon;
   final VoidCallback onPressed;
@@ -818,7 +835,14 @@ class _SocialIcon extends StatelessWidget {
   }
 }
 
-
+/// Core application state management class.
+/// Manages the application's business logic including:
+/// - Current word pair generation
+/// - History of generated word pairs
+/// - Favorite word pairs with cloud sync
+/// - Sorting options for favorites
+/// - Audio playback for user interactions
+/// Uses ChangeNotifier for reactive state updates throughout the app.
 class MyAppState extends ChangeNotifier {
   var current = WordPair.random();
   var history = <WordPair>[];  // list of word pairs that have been generated
@@ -832,7 +856,8 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Toggle alphabetical sorting (A-Z ↔ Z-A)
+  /// Toggles alphabetical sorting between A-Z and Z-A.
+  /// If currently using date-based sorting, switches to A-Z alphabetical.
   void toggleAlphabeticalSort() {
     if (_sortOption == SortOption.alphabetical) {
       _sortOption = SortOption.reverseAlphabetical;
@@ -845,7 +870,8 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Toggle date sorting (Oldest to Newest ↔ Newest to Oldest)
+  /// Toggles date-based sorting between Oldest to Newest and Newest to Oldest.
+  /// If currently using alphabetical sorting, switches to Oldest to Newest.
   void toggleDateSort() {
     if (_sortOption == SortOption.oldestToLatest) {
       _sortOption = SortOption.latestToOldest;
@@ -858,16 +884,18 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Check if currently using alphabetical sorting
+  /// Returns true if currently using alphabetical sorting (A-Z or Z-A).
   bool get isAlphabeticalSort => 
       _sortOption == SortOption.alphabetical || 
       _sortOption == SortOption.reverseAlphabetical;
 
-  // Check if currently using date sorting
+  /// Returns true if currently using date-based sorting (Oldest to Newest or Newest to Oldest).
   bool get isDateSort => 
       _sortOption == SortOption.oldestToLatest || 
       _sortOption == SortOption.latestToOldest;
 
+  /// Returns favorites list sorted according to the current sort option.
+  /// Applies alphabetical or date-based sorting based on user selection.
   List<WordPair> get sortedFavorites {
     List<WordPair> sorted = List.from(favorites);
     switch (_sortOption) {
@@ -1054,11 +1082,9 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
-  // handle the next button
-  // this function is called when the next button is pressed
-  // it generates a new random word pair and updates the current word pair
-  // it also notifies the listeners to update the UI
-
+  /// Generates a new random word pair.
+  /// Called when user interacts with the big card to generate a new word pair.
+  /// Adds current word pair to history and plays sound effect.
   void getNext() {
     _playSound();
     history.add(current);
@@ -1067,11 +1093,14 @@ class MyAppState extends ChangeNotifier {
     saveCurrentAndHistory(); // Save state after change
   }
 
-  // handle the like button
+  /// Set of favorite word pairs.
+  /// Synced with local storage and Firebase Firestore for cloud backup.
   var favorites = <WordPair>{};
 
-    void toggleFavorite() {
-    // Removed sound - no sound when toggling favorite
+  /// Toggles the favorite status of the current word pair.
+  /// Adds to favorites if not present, removes if already favorited.
+  /// No sound effect is played for this action.
+  void toggleFavorite() {
     if (favorites.contains(current)) {
       favorites.remove(current);
     } else {
@@ -1081,10 +1110,14 @@ class MyAppState extends ChangeNotifier {
     _saveFavorites();
   }
 
+  /// Plays the delete sound effect.
+  /// Used when a favorite word pair is deleted via swipe gesture.
   void playDeleteSound() {
     _playDeleteSound();
   }
 
+  /// Removes a word pair from favorites.
+  /// Called when user confirms deletion via swipe-to-delete gesture.
   void removeFavorite(WordPair pair) {
     favorites.remove(pair);
     notifyListeners();
@@ -1104,8 +1137,10 @@ class MyAppState extends ChangeNotifier {
   }
 }
 
-// ...
-
+/// Main home page widget that serves as the root navigation container.
+/// Manages the navigation rail (sidebar) and displays different pages
+/// (Generator, Favorites, Profile) based on user selection.
+/// Handles navigation rail expansion/collapse animations and gesture controls.
 class MyHomePage extends StatefulWidget {
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -1144,7 +1179,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver, Si
 
   void _animateRail(bool open) {
     if (open) {
-      _railController.animateTo(1.0, duration: Duration(milliseconds: 800), curve: Curves.elasticOut);
       _railController.animateTo(1.0, duration: Duration(milliseconds: 800), curve: Curves.elasticOut);
     } else {
       _railController.animateTo(0.0, duration: Duration(milliseconds: 200), curve: Curves.easeInOut);
@@ -1595,6 +1629,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver, Si
   }
 }
 
+/// Favorites page widget.
+/// Displays all favorite word pairs with:
+/// - Sort options (alphabetical or date-based)
+/// - Swipe-to-delete functionality (Gmail-like)
+/// - Scrollbar with drag handle for quick navigation (when alphabetically sorted)
+/// - Letter indicator bubble when dragging scrollbar
+/// Supports both portrait and landscape orientations.
 class FavoritesPage extends StatefulWidget {
   @override
   State<FavoritesPage> createState() => _FavoritesPageState();
@@ -1867,6 +1908,13 @@ class _FavoritesPageState extends State<FavoritesPage> {
   }
 }
 
+/// Individual favorite word pair item widget.
+/// Implements Gmail-like swipe-to-delete functionality:
+/// - Swipe right to reveal delete action
+/// - Word pair rectangle shrinks from left as delete rectangle expands
+/// - Trash icon with vibration animation on delete confirmation
+/// - Smooth animations for swipe and deletion
+/// Uses SizeTransition for list item animations.
 class FavoriteItem extends StatefulWidget {
   const FavoriteItem({
     super.key,
@@ -2151,6 +2199,13 @@ class _FavoriteItemState extends State<FavoriteItem> with TickerProviderStateMix
   }
 }
 
+/// Word pair generator page widget.
+/// Main page for generating and displaying word pairs:
+/// - Shows current word pair in a large interactive card
+/// - Displays history of generated word pairs with fade effect
+/// - Supports drag-up gesture to generate new word pairs
+/// - Shows tutorial prompt for first-time users
+/// - Adapts layout for portrait and landscape orientations
 class GeneratorPage extends StatefulWidget {
   @override
   State<GeneratorPage> createState() => _GeneratorPageState();
@@ -2188,6 +2243,129 @@ class _GeneratorPageState extends State<GeneratorPage> with SingleTickerProvider
     super.dispose();
   }
 
+  /// Handles the card tap/gesture to generate a new word pair.
+  /// Triggers list animation, then generates new word pair after animation completes.
+  void _handleCardTap(MyAppState appState) {
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        _listController.forward().then((_) {
+          appState.getNext();
+          _listController.reset();
+        });
+      }
+    });
+  }
+
+  /// Updates the drag offset state when user drags the big card.
+  /// Used for scaling effect on the history list during drag gesture.
+  void _handleDragOffsetChanged(double value) {
+    setState(() {
+      _dragOffset = value;
+    });
+  }
+
+  /// Builds the history list widget with fade effect and scaling animation.
+  /// Applies transform based on drag offset and list animation state.
+  Widget _buildHistoryList(MyAppState appState) {
+    return Transform(
+      alignment: Alignment.topCenter,
+      transform: Matrix4.identity()
+        ..translate(0.0, _listAnimation.value, 0.0)
+        ..scale(1.0, (1.0 + (_dragOffset * 0.003)).clamp(0.85, 1.0), 1.0),
+      child: Builder(
+        builder: (context) {
+          final surfaceColor = Theme.of(context).colorScheme.surface;
+          return ShaderMask(
+            shaderCallback: (Rect bounds) {
+              return LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.transparent, surfaceColor],
+                stops: [0.0, 0.15],
+              ).createShader(bounds);
+            },
+            blendMode: BlendMode.dstIn,
+            child: ListView(
+              reverse: true,
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              children: [
+                for (var i = 0; i < appState.history.length; i++)
+                  _buildHistoryItem(appState, i),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Builds an individual history item with opacity and font size based on position.
+  /// Older items have lower opacity and smaller font size for visual hierarchy.
+  Widget _buildHistoryItem(MyAppState appState, int index) {
+    final pair = appState.history[appState.history.length - 1 - index];
+    final opacity = (1.0 - index * 0.1).clamp(0.1, 1.0);
+    final fontSize = (25.0 - index).clamp(14.0, 25.0);
+
+    return Opacity(
+      opacity: opacity,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          appState.favorites.contains(pair)
+              ? Icon(Icons.favorite, size: fontSize * 0.7)
+              : SizedBox(width: fontSize * 0.7),
+          SizedBox(width: 10),
+          Text(
+            pair.asLowerCase,
+            style: TextStyle(fontSize: fontSize),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Builds the BigCard widget with current word pair and all callbacks configured.
+  Widget _buildBigCard(WordPair pair, MyAppState appState) {
+    return BigCard(
+      pair: pair,
+      onTap: () => _handleCardTap(appState),
+      showInitialPrompt: _isInitialDisplay,
+      isFavorite: appState.favorites.contains(pair),
+      onToggleFavorite: () => appState.toggleFavorite(),
+      onDragOffsetChanged: _handleDragOffsetChanged,
+    );
+  }
+
+  /// Builds the portrait mode layout with expanded card section.
+  Widget _buildPortraitLayout(WordPair pair, MyAppState appState) {
+    return Expanded(
+      flex: 4,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(height: 20),
+          _buildBigCard(pair, appState),
+        ],
+      ),
+    );
+  }
+
+  /// Builds the landscape mode layout with compact card section.
+  Widget _buildLandscapeLayout(WordPair pair, MyAppState appState) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        children: [
+          SizedBox(height: 10),
+          _buildBigCard(pair, appState),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
@@ -2198,134 +2376,23 @@ class _GeneratorPageState extends State<GeneratorPage> with SingleTickerProvider
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-            // 1. Expandable list ensure list takes all available top space in the column
-            Expanded(
-              flex: 3,
-              child: Transform(
-                alignment: Alignment.topCenter,
-                transform: Matrix4.identity()
-                  ..translate(0.0, _listAnimation.value, 0.0)
-                  ..scale(1.0, (1.0 + (_dragOffset * 0.003)).clamp(0.85, 1.0), 1.0),
-                child: Builder(
-                  builder: (context) {
-                    final surfaceColor = Theme.of(context).colorScheme.surface;
-                    return ShaderMask(
-                      shaderCallback: (Rect bounds) {
-                        return LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, surfaceColor],
-                          stops: [0.0, 0.15],
-                        ).createShader(bounds);
-                      },
-                      blendMode: BlendMode.dstIn,
-                      child: ListView(
-                        reverse: true,
-                        shrinkWrap: true,
-                        physics: NeverScrollableScrollPhysics(),
-                        children: [
-                          for (var i = 0; i < appState.history.length; i++)
-                            Builder(builder: (context) {
-                              var pair = appState.history[appState.history.length - 1 - i];
-                              var opacity = (1.0 - i * 0.1).clamp(0.1, 1.0);
-                              var fontSize = (25.0 - i).clamp(14.0, 25.0);
-  
-                              return Opacity(
-                                opacity: opacity,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    appState.favorites.contains(pair)
-                                        ? Icon(Icons.favorite, size: fontSize * 0.7)
-                                        : SizedBox(width: fontSize * 0.7),
-                                    SizedBox(width: 10),
-                                    Text(pair.asLowerCase,
-                                        style: TextStyle(fontSize: fontSize),
-                                        textAlign: TextAlign.center),
-                                  ],
-                                ),
-                              );
-                            }),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-            
-          if (!isLandscape)
-            Expanded(
-              flex: 4,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SizedBox(height: 20),
-                  BigCard(
-                    pair: pair,
-                    onTap: () {
-                      Future.delayed(const Duration(milliseconds: 200), () {
-                        if (mounted) {
-                          _listController.forward().then((_) {
-                            appState.getNext();
-                            _listController.reset();
-                          });
-                        }
-                      });
-                    },
-                    showInitialPrompt: _isInitialDisplay,
-                    isFavorite: appState.favorites.contains(pair),
-                    onToggleFavorite: () {
-                      appState.toggleFavorite();
-                    },
-                    onDragOffsetChanged: (value) {
-                      setState(() {
-                        _dragOffset = value;
-                      });
-                    },
-                  ),
-                ],
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: Column(
-                children: [
-                  SizedBox(height: 10),
-                  BigCard(
-                    pair: pair,
-                    onTap: () {
-                      Future.delayed(const Duration(milliseconds: 200), () {
-                        if (mounted) {
-                          _listController.forward().then((_) {
-                            appState.getNext();
-                            _listController.reset();
-                          });
-                        }
-                      });
-                    },
-                    showInitialPrompt: _isInitialDisplay,
-                    isFavorite: appState.favorites.contains(pair),
-                    onToggleFavorite: () {
-                      appState.toggleFavorite();
-                    },
-                    onDragOffsetChanged: (value) {
-                      setState(() {
-                        _dragOffset = value;
-                      });
-                    },
-                  ),
-                ],
-              ),
-            ),
-        ],
+        Expanded(
+          flex: 3,
+          child: _buildHistoryList(appState),
+        ),
+        if (!isLandscape)
+          _buildPortraitLayout(pair, appState)
+        else
+          _buildLandscapeLayout(pair, appState),
+      ],
     );
   }
 }
 
-// Alphabetical sorting toggle button - shows A-Z or Z-A icon based on current order
+/// Alphabetical sorting toggle button widget.
+/// Displays A-Z or Z-A icon based on current alphabetical sort order.
+/// Toggles between alphabetical and reverse alphabetical sorting when pressed.
+/// Shows selected state with background color when active.
 class _AlphabeticalSortButton extends StatelessWidget {
   const _AlphabeticalSortButton();
 
@@ -2362,7 +2429,10 @@ class _AlphabeticalSortButton extends StatelessWidget {
   }
 }
 
-// Date sorting toggle button - shows current date order icon
+/// Date sorting toggle button widget.
+/// Displays icon for current date sort order (Oldest to Newest or Newest to Oldest).
+/// Toggles between the two date-based sorting options when pressed.
+/// Shows selected state with background color when active.
 class _DateSortButton extends StatelessWidget {
   const _DateSortButton();
 
@@ -2399,10 +2469,15 @@ class _DateSortButton extends StatelessWidget {
   }
 }
 
-// ...
-
-
-// A widget that displays a big card with the current word pair
+/// Large interactive card widget displaying the current word pair.
+/// Features:
+/// - Frosty transparent background with blur effect
+/// - Drag-up gesture to generate new word pairs
+/// - Favorite toggle button (heart icon)
+/// - Slide-in animation for word pairs
+/// - Tutorial prompt with crossfade animation for first-time users
+/// - Rebound animation when drag is released
+/// - Responsive to theme (light/dark mode)
 class BigCard extends StatefulWidget {
   const BigCard({
     super.key,
